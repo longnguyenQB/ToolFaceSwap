@@ -9,6 +9,7 @@ import sys
 import random
 import os
 import shutil
+import traceback
 from utils import *
 import cv2
 import numpy as np
@@ -27,7 +28,7 @@ class BatchProcessor(QWidget):
             configs = read_js(path="./config/configs.json")
         except:
             pass
-        self.setWindowTitle("LT_ToolFaceSwap_V0.1")
+        self.setWindowTitle("LT_ToolFaceSwap_V0.2")
         self.setGeometry(100, 100, 800, 400)
         # Đặt màu nền đen cho toàn bộ ứng dụng
         self.setStyleSheet("""
@@ -184,6 +185,9 @@ class ThreadsSwap(QThread):
         self.path_cccds = convert_path(self.path_cccd)
         self.path_video_peoples = convert_path(self.path_video_people)
         self.path_save = convert_path(self.path_save)
+        if not os.path.exists(os.path.join(self.path_save, "thatbai")):
+            os.makedirs(os.path.join(self.path_save, "thatbai"))
+
         configs = {
                 "path_cccds": self.path_cccds,
                 "path_video_peoples": self.path_video_peoples,
@@ -195,8 +199,6 @@ class ThreadsSwap(QThread):
             self.is_running = False
             self.terminate()
             return
-        list_folder_cccd = os.listdir(self.path_cccds)
-        list_video_people = os.listdir(self.path_video_peoples)
 
         # # Tải mô hình hoán đổi khuôn mặt
         swapper = insightface.model_zoo.get_model('./inswapper_128.onnx', download=False)
@@ -204,12 +206,46 @@ class ThreadsSwap(QThread):
         # Khởi tạo ứng dụng nhận diện khuôn mặt
         app = FaceAnalysis(name="buffalo_l")
         app.prepare(ctx_id=0, det_size=(640, 640))
-
         success = 0
+        fail = 0
         while True:
+
+            list_folder_cccd = os.listdir(self.path_cccds)
+            list_video_people = os.listdir(self.path_video_peoples)
+            self.signal_success.emit(f"Thành công: {success} | Thất bại: {fail} | Video còn: {len(list_video_people)} | CCCD còn: {len(list_folder_cccd)}")
+            if (len(list_folder_cccd) == 0):
+                self.signal_status.emit("Đã chạy xong: Hết ảnh CCCD.")
+                break
+
+            if (len(list_video_people) == 0):
+                self.signal_status.emit("Đã chạy xong: Hết video.")
+                break
+
+            
+
             try:
+                self.signal_status.emit("Đang tìm CCCD mặt trước...")
                 name_folder_cccd = list_folder_cccd.pop(0)
-                path_img_front_cccd = os.path.join(self.path_cccds, name_folder_cccd, "CMT_TRUOC.jpg")
+                img_cccd = os.listdir(os.path.join(self.path_cccds, name_folder_cccd))
+                for img in img_cccd:
+                    if check_face(path_img=os.path.join(self.path_cccds, name_folder_cccd, img)):
+                        path_img_front_cccd = os.path.join(self.path_cccds, name_folder_cccd, img)
+                        img_cccd.remove(img)
+                        path_img_back_cccd = os.path.join(self.path_cccds, name_folder_cccd, img_cccd[0])
+                        break
+
+                try:
+                    print(path_img_front_cccd)
+                except:
+                    fail += 1
+                    self.signal_success.emit(f"Thành công: {success} | Thất bại: {fail} | Video còn: {len(list_video_people)} | CCCD còn: {len(list_folder_cccd)}")
+                    # Copy thư mục cccd lỗi
+                    try:
+                        shutil.move(os.path.join(self.path_cccds, name_folder_cccd), os.path.join(self.path_save, "thatbai"))
+                    except Exception:
+                        traceback.print_exc()
+                        pass
+                    continue
 
                 name_video_people = list_video_people.pop(0)
                 path_video_people = os.path.join(self.path_video_peoples, name_video_people)
@@ -220,7 +256,7 @@ class ThreadsSwap(QThread):
                 path_video_people = convert_path(path_video_people)
 
                 # Cắt ảnh mặt chính diện
-                self.signal_status.emit("Đang cắt ảnh mặt chính diện...")
+                self.signal_status.emit("Đang cắt ảnh mặt chính diện từ video...")
                 path_img_face = get_bestface(video_path=path_video_people, output_path=os.path.join(self.path_video_peoples, "best_face.jpg"))
                 if path_img_face:
                     self.signal_status.emit("Đang hoán đổi mặt...")
@@ -236,12 +272,14 @@ class ThreadsSwap(QThread):
                         print("Không tìm thấy khuôn mặt trong một trong hai ảnh.")
                         try:
                             os.remove(path_img_face)
-                        except:
+                        except Exception:
+                            traceback.print_exc()
                             pass
 
                         try:
                             os.remove(path_video_people)
-                        except:
+                        except Exception:
+                            traceback.print_exc()
                             pass
                     else:
                         # Chọn khuôn mặt đầu tiên từ ảnh nguồn và ảnh đích
@@ -260,36 +298,48 @@ class ThreadsSwap(QThread):
                         # Copy ảnh cắt vào
                         try:
                             shutil.move(path_img_face, os.path.join(self.path_save, name_video_people))
-                        except:
+                        except Exception:
+                            traceback.print_exc()
                             pass
 
                         
                         # Copy video
                         try:
                             shutil.move(path_video_people, os.path.join(self.path_save, name_video_people))
-                        except:
+                        except Exception:
+                            traceback.print_exc()
                             pass
 
                         # Copy mặt sau
                         try:
-                            shutil.move(os.path.join(self.path_cccds, name_folder_cccd, "CMT_SAU.jpg"), os.path.join(self.path_save, name_video_people))
-                        except:
+                            shutil.move(path_img_back_cccd, os.path.join(self.path_save, name_video_people, "CCCD_SAU.jpg"))
+                        except Exception:
+                            traceback.print_exc()
                             pass
 
                         try:
                             shutil.rmtree(os.path.join(self.path_cccds, name_folder_cccd))
-                        except:
+                        except Exception:
+                            traceback.print_exc()
                             pass
 
                         # Lưu hoặc hiển thị ảnh kết quả
-                        cv2.imwrite(os.path.join(self.path_save, name_video_people, "CMT_TRUOC.jpg"), swapped_img)
+                        cv2.imwrite(os.path.join(self.path_save, name_video_people, "CCCD_TRUOC.jpg"), swapped_img)
                         # cv2.imshow("Face Swapped", swapped_img)
                         # cv2.waitKey(0)
                         # cv2.destroyAllWindows()
                         success += 1
-                        self.signal_success.emit(f"Thành công: {success}")
-            except:
-                self.signal_status.emit("Đã chạy xong!")
+                        self.signal_success.emit(f"Thành công: {success} | Thất bại: {fail} | Video còn: {len(list_video_people)} | CCCD còn: {len(list_folder_cccd)}")
+                else:
+                    fail += 1
+                    self.signal_success.emit(f"Thành công: {success} | Thất bại: {fail} | Video còn: {len(list_video_people)} | CCCD còn: {len(list_folder_cccd)}")
+                    try:
+                        shutil.move(path_video_people, os.path.join(self.path_save, "thatbai"))
+                    except Exception:
+                        traceback.print_exc()
+                        pass
+            except Exception:
+                traceback.print_exc()
                 break
 
 if __name__ == "__main__":

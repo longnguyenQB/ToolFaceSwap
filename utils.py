@@ -81,6 +81,23 @@ def crop_to_9_16(video_path, output_path):
         return output_path
     else:
         return video_path
+
+def check_face(path_img):
+    app = FaceAnalysis()
+    app.prepare(ctx_id=0, det_size=(640, 640))
+    # Mở ảnh
+    try:
+        img = cv2.imread(path_img)
+        faces = app.get(img)  # Trích xuất khuôn mặt
+    except Exception as e:
+        print(f"Không thể mở ảnh {path_img}: {e}")
+        return False
+
+    if len(faces) > 0:
+        return True
+    else:
+        return False
+
 def get_bestface(video_path, output_path):
     # Khởi tạo ứng dụng InsightFace
     app = FaceAnalysis(name='buffalo_l')
